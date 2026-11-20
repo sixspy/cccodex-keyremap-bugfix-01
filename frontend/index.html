@@ -53,6 +53,7 @@ createApp({
     const username=ref('admin'), password=ref('123456'), err=ref(''), actionErr=ref('');
     const leftTab=ref(0), rightTab=ref(0);
     const versions=ref([]), mappings=ref([]), formal=ref([]), conflicts=ref([]);
+    const inbound=ref([]), recon=ref(null), audits=ref([]);
     const oldKey=ref('OLD-B1');
     function auth(){return {Authorization:'Bearer '+token.value,'Content-Type':'application/json'};}
     async function login(){
@@ -78,17 +79,28 @@ createApp({
       mappings.value=Array.isArray(m.items)?m.items:[];
       const f=await loadJson('/api/formal'); if(f===null) return;
       formal.value=Array.isArray(f.items)?f.items:[];
+      const ib=await loadJson('/api/inbound'); if(ib===null) return;
+      inbound.value=Array.isArray(ib.items)?ib.items:[];
       const c=await loadJson('/api/conflicts'); if(c===null) return;
       conflicts.value=Array.isArray(c.items)?c.items:[];
+      const r=await loadJson('/api/reconciliation'); if(r===null) return;
+      recon.value=r;
+      const a=await loadJson('/api/audits'); if(a===null) return;
+      audits.value=Array.isArray(a.items)?a.items:[];
     }
     async function doRemap(){
       actionErr.value='';
       const r=await fetch('/api/remap',{method:'POST',headers:auth(),body:JSON.stringify({old_key:oldKey.value})});
-      const j=await r.json(); actionErr.value=r.ok?('正式键 '+j.entity_key):(j.detail||'失败');
+      const j=await r.json();
+      if(r.ok){
+        actionErr.value='重映回执：'+j.outcome+'｜旧键 '+j.old_key+' → 正式键 '+j.entity_key+'（审计#'+j.audit_id+'）';
+      }else{
+        actionErr.value='回执失败：'+(j.detail||'失败');
+      }
       await refresh();
     }
     onMounted(()=>{if(token.value)refresh();});
-    return {token,user,username,password,err,actionErr,leftTab,rightTab,versions,mappings,formal,conflicts,oldKey,login,logout,doRemap};
+    return {token,user,username,password,err,actionErr,leftTab,rightTab,versions,mappings,formal,conflicts,inbound,recon,audits,oldKey,login,logout,doRemap};
   },
   template:`
   <div v-if="!token" class="login">
@@ -122,13 +134,39 @@ createApp({
           <input v-model="oldKey"/>
           <button class="primary" @click="doRemap">重映入正式区</button>
           <div class="err">{{actionErr}}</div>
+          <h2 style="margin-top:14px">入站列表 Inbound</h2>
+          <table><thead><tr><th>old</th><th>status</th><th>arrived</th></tr></thead>
+          <tbody><tr v-for="i in inbound" :key="i.id">
+            <td>{{i.old_key}}</td>
+            <td :class="i.status==='已重映'?'ok':'bad'">{{i.status}}</td>
+            <td>{{i.arrived_at}}</td>
+          </tr></tbody></table>
+          <h2 style="margin-top:14px">重映留痕 Audits</h2>
+          <table><thead><tr><th>old</th><th>outcome</th><th>at</th></tr></thead>
+          <tbody><tr v-for="a in audits" :key="a.id">
+            <td>{{a.old_key}}</td>
+            <td :class="a.outcome==='成功'?'ok':(a.outcome==='回滚'||a.outcome==='半成功偏了'?'bad':'')">{{a.outcome}}</td>
+            <td>{{a.at}}</td>
+          </tr></tbody></table>
         </div>
       </div>
       <div class="bridge"></div>
       <div class="pane">
+        <div class="box" v-if="recon">
+          <h2>互证卡 Reconciliation</h2>
+          <p style="margin:6px 0;font-size:13px">
+            状态：<b :class="recon.aligned?'ok':'bad'">{{recon.aligned?'五处对齐':'存在撕裂'}}</b>
+            ｜正式 {{recon.formal_count}} ｜入站待重映 {{recon.inbound_pending_count}}
+            ｜冲突挂起 {{recon.conflict_pending_count}}
+          </p>
+          <p v-if="!recon.aligned" style="margin:6px 0;font-size:12px" class="bad">
+            撕裂键 torn：{{recon.torn.join(', ')||'无'}}；清除无正式 orphan：{{recon.orphan_cleared.join(', ')||'无'}}
+          </p>
+        </div>
         <div class="tabs">
           <button :class="{on:rightTab===0}" @click="rightTab=0">正式区</button>
-          <button :class="{on:rightTab===1}" @click="rightTab=1">冲突队列</button>
+          <button :class="{on:rightTab===1}" @click="rightTab=1">入站</button>
+          <button :class="{on:rightTab===2}" @click="rightTab=2">冲突队列</button>
         </div>
         <div class="box" v-show="rightTab===0">
           <h2>Formal Zone</h2>
@@ -136,6 +174,15 @@ createApp({
           <tbody><tr v-for="f in formal" :key="f.id"><td class="ok">{{f.entity_key}}</td><td>{{f.mapped_from}}</td><td>{{f.version}}</td><td>{{f.created_at}}</td></tr></tbody></table>
         </div>
         <div class="box" v-show="rightTab===1">
+          <h2>Inbound Queue</h2>
+          <table><thead><tr><th>old</th><th>status</th><th>arrived</th></tr></thead>
+          <tbody><tr v-for="i in inbound" :key="i.id">
+            <td>{{i.old_key}}</td>
+            <td :class="i.status==='已重映'?'ok':'bad'">{{i.status}}</td>
+            <td>{{i.arrived_at}}</td>
+          </tr></tbody></table>
+        </div>
+        <div class="box" v-show="rightTab===2">
           <h2>Conflicts</h2>
           <table><thead><tr><th>old</th><th>reason</th><th>status</th></tr></thead>
           <tbody><tr v-for="c in conflicts" :key="c.id"><td class="bad">{{c.old_key}}</td><td>{{c.reason}}</td><td>{{c.status}}</td></tr></tbody></table>

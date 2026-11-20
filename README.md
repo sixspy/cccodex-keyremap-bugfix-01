@@ -49,3 +49,17 @@ python -m pip install -r requirements.txt
 python -m uvicorn app:app --app-dir backend --host 127.0.0.1 --port 10604
 python -m pytest -q
 `
+
+## 半成功撕裂切断（乙路径）
+
+重映统一走 `POST /api/remap`，口径见 `docs/半成功切断说明.md`（2026-11-20 锁定，当天禁改口）：
+入站清除与正式插入在同库 `BEGIN IMMEDIATE` 一次事务内同败同成，缺一方两侧回滚；
+同键双路抢映由库级写锁串行，后到只记 `争用`；偏离说明的写法拒写并记 `半成功偏了`。
+
+| 接口 | 用途 |
+|------|------|
+| `GET /api/inbound` | 入站列表（待重映/已重映） |
+| `GET /api/reconciliation` | 互证卡：`torn`/`orphan_cleared` 为空才 `aligned` |
+| `GET /api/audits` | 重映留痕：成功/争用/冲突/回滚/半成功偏了 |
+
+撕裂夹具：`fixtures/torn_remap/`（构建器 + 本地 SQLite 库，正式已挂、入站未清、冲突无挂起）。

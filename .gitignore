@@ -1,5 +1,6 @@
 data/*.db
 data/*.db-*
+fixtures/torn_remap/*.db
 __pycache__/
 .pytest_cache/
 .venv/
